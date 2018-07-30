@@ -23,7 +23,7 @@ Parameters:
   DbMasterUserPassword:
     Type: String
     NoEcho: true
-    Description: "Password for master database user. Please record; needed to connect."
+    Description: "Password for master database user. 8 characters, minimum. Please record; needed to connect."
 
   DbPort:
     Type: Number
@@ -35,7 +35,7 @@ Parameters:
     Description: "Subnet in which database may be created. Must be in chosen Virtual Private Cloud."
   DbSubnet2Id:
     Type: "AWS::EC2::Subnet::Id"
-    Description: "Other subnet in which database may be created. Must also be in chosen VPC."
+    Description: "Different subnet in which database may be created. Must also be in chosen VPC."
 
   VpcId:
     Type: "AWS::EC2::VPC::Id"
