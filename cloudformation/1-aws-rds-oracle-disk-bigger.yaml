@@ -1,0 +1,179 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: "Managed Oracle database server example for Northern California Oracle User Group Journal. Paul Marcelin, 2017-2018"
+
+Parameters:
+
+  DbClientIpV4Addr:
+    Type: String
+    Description: "Public IPv4 address from which you will connect. Visit whatismyipaddress.com from client. If connecting from an AWS client in same Virtual Private Cloud (VPC), see SourceSecurityGroupId in template, instead."
+    AllowedPattern: "([0-9]{1,3}\\.){3}[0-9]{1,3}"
+    ConstraintDescription: "A single IPv4 address of the form NNN.NNN.NNN.NNN is required."
+
+  DbEngine:
+    Type: String
+    Description: "AWS Relational Database Service engine name"
+    Default: "oracle-se2"
+  DbEngineVersMajor:
+    Type: String
+    Description: "Major version of chosen database engine"
+    Default: "12.1"
+
+  DbMasterUserPassword:
+    Type: String
+    NoEcho: true
+    Description: "Password for master database user. 8 characters, minimum. Please record; needed to connect."
+
+  DbPort:
+    Type: Number
+    Description: TCP port for database traffic"
+    Default: 1521
+
+  DbSubnet1Id:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: "Subnet in which database may be created. Must be in chosen Virtual Private Cloud."
+  DbSubnet2Id:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: "Different subnet in which database may be created. Must also be in chosen VPC."
+
+  VpcId:
+    Type: "AWS::EC2::VPC::Id"
+    Description: "Virtual Private Cloud in which to create database. Generally, select default VPC."
+  VpcKeyword:
+    Type: String
+    Description: "Text keyword to identify chosen VPC"
+    Default: "DefaultVPC"
+
+Resources:
+
+
+  DbServerGenExVpcSecGrp:
+    Type: "AWS::EC2::SecurityGroup"
+    DeletionPolicy: Delete
+    Properties:
+      GroupDescription: !Sub "Database server; general traffic from outside ${VpcKeyword}"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - # Dummy (prevents CloudFormation from automatically creating a rule allowing all outbound traffic)
+          IpProtocol: "-1"  # All traffic
+          CidrIp: "127.0.0.1/32"  # Loopback interface
+      SecurityGroupIngress:
+        - # General-purpose access from a single IP address to the database
+          IpProtocol: tcp
+          FromPort: !Ref DbPort
+          ToPort: !Ref DbPort
+          CidrIp: !Sub "${DbClientIpV4Addr}/32"
+          # SourceSecurityGroupId: String
+          # For an AWS client within the VPC, such as an Elastic Compute
+          # Cloud (EC2) instance, create a client security group, attach
+          # it to the client, and reference it by its identifier instead
+          # of by IP address range (CIDR). Referencing other security
+          # groups is clearer, safer, and more reliable than referencing
+          # IP addresses. N.B.: A pair of asymetric security groups is
+          # almost always needed. One group allows outbound traffic from
+          # the client and the other, inbound traffic to the server.
+      Tags:
+        - { Key: Name, Value: !Sub "${VpcKeyword}-DbServer-Gen-ExVpc" }
+        - { Key: Scope, Value: Server }
+        - { Key: Service, Value: Database }
+        - { Key: Use, Value: General }
+
+  # For production, define at least one security group per VPC per service
+  # per use case. Administration, replication, and application access
+  # are database-specific examples that will certainly involve different
+  # sources, and might also require different network protocols and ports.
+
+
+  DbSubnetGrp:
+    Type: "AWS::RDS::DBSubnetGroup"
+    DeletionPolicy: Delete
+    Properties:
+      DBSubnetGroupDescription: "${VpcKeyword}-Example"
+      SubnetIds:
+        - !Ref DbSubnet1Id
+        - !Ref DbSubnet2Id
+        # This template supports exactly 2 subnets because CloudFormation
+        # limitations preclude using the Subnet::Id parameter type (which
+        # populates a pop-up menu) for an arbitrary number of subnets.
+      Tags:
+        - { Key: Name, Value: !Sub "${VpcKeyword}-Example" }
+
+
+  DbOptGrp:
+    Type: "AWS::RDS::OptionGroup"
+    DeletionPolicy: Delete
+    Properties:
+      EngineName: !Ref DbEngine
+      MajorEngineVersion: !Ref DbEngineVersMajor
+      OptionGroupDescription: !Sub "${DbEngine}-${DbEngineVersMajor}-Example"
+      # OptionConfigurations:
+      # Override specific defaults here or, for explicit configuration
+      # management, restate all defaults. Potentially useful for the latter approach:
+      # docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-using-cloudformer.html
+      Tags:
+        - { Key: Name, Value: !Sub "${DbEngine}-${DbEngineVersMajor}-Example" }
+
+
+  DbParamGrp:
+    Type: "AWS::RDS::DBParameterGroup"
+    DeletionPolicy: Delete
+    Properties:
+      Description: !Sub "${DbEngine}-${DbEngineVersMajor}-Example"
+      Family: !Sub "${DbEngine}-${DbEngineVersMajor}"
+      # Parameters:
+      # Override specific defaults here or, for explicit configuration
+      # management, restate all defaults. Potentially useful for the latter approach:
+      # docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-using-cloudformer.html
+      Tags:
+        - { Key: Name, Value: !Sub "${DbEngine}-${DbEngineVersMajor}-Example" }
+
+
+  DbInst:
+    Type: "AWS::RDS::DBInstance"
+    DeletionPolicy: Delete  # For production, use Retain to preserve if stack is deleted
+    Properties:
+
+      DBInstanceClass: "db.t2.medium"  # Minimum size for encryption
+      AllocatedStorage: 50  # GiB
+      StorageType: "gp2"  # General-purpose solid state disk (SSD)
+      StorageEncrypted: true
+      # KmsKeyId: String
+      # Defaults to the generic RDS key for the AWS account.
+      # For production, create a custom, single-purpose KMS key.
+
+      Engine: !Ref DbEngine
+      EngineVersion: !Ref DbEngineVersMajor
+      # By default, AWS uses the latest supported minor version.
+      # Append a specific minor version number to override.
+      LicenseModel: "license-included"
+      OptionGroupName: !Ref DbOptGrp
+      DBParameterGroupName: !Ref DbParamGrp
+      CharacterSetName: "AL32UTF8"
+
+      DBSubnetGroupName: !Ref DbSubnetGrp
+      MultiAZ: false
+      # AvailabilityZone: String
+      # By default, AWS chooses any zone from among those in the subnet group.
+      Port: !Ref DbPort
+      VPCSecurityGroups:
+        - !Ref DbServerGenExVpcSecGrp
+      PubliclyAccessible: true
+
+      DBInstanceIdentifier: !Sub "${AWS::StackName}-Db"
+      Tags:
+        - { Key: Name, Value: !Sub "${AWS::StackName}-Db" }
+      CopyTagsToSnapshot: true
+
+      MasterUsername: "master"
+      MasterUserPassword: !Ref DbMasterUserPassword
+
+      DBName: "ORCL"
+
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: true
+      PreferredMaintenanceWindow: "Sat:15:00-Sat:16:00"  # UTC
+
+      BackupRetentionPeriod: 1  # days
+      PreferredBackupWindow: "14:00-14:30"  # UTC
+      
